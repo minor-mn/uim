@@ -2,8 +2,6 @@
 .dart_tool/
 /build/
 
-.github
-
 # Claude Code の作業用
 .claude/
 

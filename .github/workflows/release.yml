@@ -1,0 +1,65 @@
+# v から始まるタグ（v1.0.0 など）を push すると、macOS（Apple Silicon）と Linux（x64・arm64）向けにビルドし、
+# それぞれを tar.gz にして、そのタグの Release に添付する。
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-latest
+            name: macos-arm64
+          # 古めの Ubuntu でビルドして、SSH 先の古い glibc でも動くようにする。
+          - runner: ubuntu-22.04
+            name: linux-x64
+          - runner: ubuntu-22.04-arm
+            name: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.11.6
+
+      # tree-sitter と各言語の文法（C）は、hook/build.dart がここでコンパイルする。
+      - name: Build
+        run: |
+          dart pub get
+          dart build cli -t bin/uim.dart
+
+      # bundle（bin/uim と lib/）と、~/.config/uim に置く color.json5 と、それらを置く install.sh を
+      # 1つのフォルダーにまとめる。install.sh が releases/latest/download/uim-<OS>-<CPU>.tar.gz から
+      # 取れるよう、名前にバージョンを入れない。
+      - name: Archive
+        run: |
+          mkdir uim
+          cp -R build/cli/*/bundle uim/uim
+          cp config/color.json5 scripts/install.sh uim/
+          tar -czf uim-${{ matrix.name }}.tar.gz uim
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uim-${{ matrix.name }}
+          path: uim-${{ matrix.name }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" uim-*.tar.gz --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
