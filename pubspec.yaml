@@ -1,0 +1,16 @@
+name: uim
+description: A tiny vim clone with almost no features.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.10.0
+
+executables:
+  uim:
+dependencies:
+  code_assets: ^2.1.0
+  ffi: ^2.2.0
+  hooks: ^2.2.0
+  json5: ^0.8.2
+  native_toolchain_c: ^0.19.5

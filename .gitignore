@@ -1,0 +1,17 @@
+# Dart（lib/src/*.g.dart は生成物だが、ビルドに要るので入れる）
+.dart_tool/
+/build/
+
+.github
+
+# Claude Code の作業用
+.claude/
+
+# macOS
+.DS_Store
+
+# エディタ
+*.swp
+*~
+.vscode/
+.idea/
