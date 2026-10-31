@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'colors.dart';
+import 'encoding.dart';
 import 'highlight.dart';
 import 'terminal.dart';
 import 'width.dart';
@@ -71,6 +72,10 @@ class Editor {
   /// one empty line is then written as an empty file, as vim does.
   bool _loadedEmpty = true;
 
+  /// Encoding and line ending of the file, kept when writing it.
+  TextEncoding _encoding = TextEncoding.utf8;
+  LineEnding _lineEnding = LineEnding.lf;
+
   int _row = 0;
   int _col = 0;
 
@@ -134,9 +139,11 @@ class Editor {
       return;
     }
     final bytes = file.readAsBytesSync();
-    final text = utf8.decode(bytes, allowMalformed: true);
-    final parts = text.split('\n');
-    if (text.endsWith('\n')) parts.removeLast();
+    final (text, encoding) = decodeText(bytes);
+    _encoding = encoding;
+    _lineEnding = detectLineEnding(text);
+    final parts = splitLines(text);
+    if (text.endsWith('\n') || text.endsWith('\r')) parts.removeLast();
     _lines = parts.map((s) => s.runes.toList()).toList();
     if (_lines.isEmpty) _lines.add(<int>[]);
     _loadedEmpty = text.isEmpty;
@@ -670,9 +677,15 @@ class Editor {
     final file = File(p);
     final exists = file.existsSync();
     final empty = _loadedEmpty && _lines.length == 1 && _lines.first.isEmpty;
-    final data = empty
-        ? <int>[]
-        : utf8.encode('${_lines.map(String.fromCharCodes).join('\n')}\n');
+    final eol = _lineEnding.text;
+    final data = encodeText(
+      empty ? '' : '${_lines.map(String.fromCharCodes).join(eol)}$eol',
+      _encoding,
+    );
+    if (data == null) {
+      _error('E513: Write error, conversion failed (${_encoding.label})');
+      return false;
+    }
     try {
       if (exists && !_isWritable(file)) {
         if (!force) {
@@ -752,24 +765,40 @@ class Editor {
       sb.write('\x1b[K\r\n');
     }
 
-    switch (_mode) {
-      case Mode.command:
-        sb.write(fitWidth(':$_cmdline', cols));
-      case Mode.insert:
-        sb.write('\x1b[1m${fitWidth('-- INSERT --', cols)}\x1b[0m');
-      case Mode.visual:
-        sb.write('\x1b[1m${fitWidth('-- VISUAL --', cols)}\x1b[0m');
-      case Mode.normal:
-        final text = fitWidth(_message, cols - 1);
-        sb.write(_messageIsError ? '\x1b[97;41m$text\x1b[0m' : text);
-    }
-    sb.write('\x1b[K');
+    _renderStatus(sb, cols);
 
     final (y, x) = _mode == Mode.command
         ? (rows, min(cols, stringWidth(':$_cmdline') + 1))
         : (_row - _top + 1, curDisp - _left + 1);
     sb.write('\x1b[$y;${x}H\x1b[?25h');
     return sb.toString();
+  }
+
+  /// The bottom line: black on white, with the mode, command line or message
+  /// on the left and the file's encoding and line ending on the right.
+  void _renderStatus(StringBuffer sb, int cols) {
+    const bar = '\x1b[0;30;107m';
+    final right = '${_encoding.label} / ${_lineEnding.label}';
+    final rightWidth = stringWidth(right);
+    // Keep one column between the two, and drop the right part if it does
+    // not fit.
+    final showRight = rightWidth + 2 <= cols;
+    final leftCols = showRight ? cols - rightWidth - 1 : cols;
+    final (left, style) = switch (_mode) {
+      Mode.command => (':$_cmdline', ''),
+      Mode.insert => ('-- INSERT --', '\x1b[1m'),
+      Mode.visual => ('-- VISUAL --', '\x1b[1m'),
+      Mode.normal => (_message, _messageIsError ? '\x1b[97;41m' : ''),
+    };
+    final text = fitWidth(left, leftCols);
+    sb
+      ..write(bar)
+      ..write(style)
+      ..write(text)
+      ..write(bar)
+      ..write(' ' * (leftCols - stringWidth(text)));
+    if (showRight) sb.write(' $right');
+    sb.write('\x1b[0m');
   }
 
   List<List<String?>>? _styles(int first, int last) {
