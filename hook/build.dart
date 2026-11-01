@@ -12,18 +12,25 @@ const grammars = {
   'crystal': 'third_party/tree-sitter-crystal/src',
   'css': 'third_party/tree-sitter-css/src',
   'dart': 'third_party/tree-sitter-dart/src',
+  'dockerfile': 'third_party/tree-sitter-dockerfile/src',
   'elixir': 'third_party/tree-sitter-elixir/src',
   'erlang': 'third_party/tree-sitter-erlang/src',
   'groovy': 'third_party/tree-sitter-groovy/src',
+  'hcl': 'third_party/tree-sitter-hcl/src',
   'html': 'third_party/tree-sitter-html/src',
   'ini': 'third_party/tree-sitter-ini/src',
+  'java': 'third_party/tree-sitter-java/src',
   'javascript': 'third_party/tree-sitter-javascript/src',
   'json': 'third_party/tree-sitter-json/src',
   'json5': 'third_party/tree-sitter-json5/src',
   'kotlin': 'third_party/tree-sitter-kotlin/src',
+  'make': 'third_party/tree-sitter-make/src',
+  'nginx': 'third_party/tree-sitter-nginx/src',
   'properties': 'third_party/tree-sitter-properties/src',
   'ruby': 'third_party/tree-sitter-ruby/src',
+  'ssh_config': 'third_party/tree-sitter-ssh-config/src',
   'swift': 'third_party/tree-sitter-swift/src',
+  'toml': 'third_party/tree-sitter-toml/src',
   'tsx': 'third_party/tree-sitter-typescript/tsx/src',
   'typescript': 'third_party/tree-sitter-typescript/typescript/src',
   'xml': 'third_party/tree-sitter-xml/xml/src',
@@ -56,8 +63,9 @@ void main(List<String> args) async {
           assetName: 'grammar/$name',
           sources: [
             '$dir/parser.c',
-            if (File.fromUri(input.packageRoot.resolve('$dir/scanner.c'))
-                .existsSync())
+            if (File.fromUri(
+              input.packageRoot.resolve('$dir/scanner.c'),
+            ).existsSync())
               '$dir/scanner.c',
           ],
           includes: [dir],

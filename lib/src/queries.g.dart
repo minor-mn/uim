@@ -970,6 +970,69 @@ const dartHighlights = r'''
 
 ''';
 
+const dockerfileHighlights = r'''
+; tree-sitter-dockerfile/queries/highlights.scm
+[
+	"FROM"
+	"AS"
+	"RUN"
+	"CMD"
+	"LABEL"
+	"EXPOSE"
+	"ENV"
+	"ADD"
+	"COPY"
+	"ENTRYPOINT"
+	"VOLUME"
+	"USER"
+	"WORKDIR"
+	"ARG"
+	"ONBUILD"
+	"STOPSIGNAL"
+	"HEALTHCHECK"
+	"SHELL"
+	"MAINTAINER"
+	"CROSS_BUILD"
+	(heredoc_marker)
+	(heredoc_end)
+] @keyword
+
+[
+	":"
+	"@"
+] @operator
+
+(comment) @comment
+
+
+(image_spec
+	(image_tag
+		":" @punctuation.special)
+	(image_digest
+		"@" @punctuation.special))
+
+[
+	(double_quoted_string)
+	(single_quoted_string)
+	(json_string)
+	(heredoc_line)
+] @string
+
+(expansion
+  [
+	"$"
+	"{"
+	"}"
+  ] @punctuation.special
+) @none
+
+((variable) @constant
+ (#match? @constant "^[A-Z][A-Z_0-9]*$"))
+
+
+
+''';
+
 const elixirHighlights = r'''
 ; tree-sitter-elixir/queries/highlights.scm
 ; Punctuation
@@ -1756,6 +1819,129 @@ const groovyHighlights = r'''
 
 ''';
 
+const hclHighlights = r'''
+; tree-sitter-hcl/queries/nvim/hcl/highlights.scm
+; highlights.scm
+[
+  "!"
+  "*"
+  "/"
+  "%"
+  "+"
+  "-"
+  ">"
+  ">="
+  "<"
+  "<="
+  "=="
+  "!="
+  "&&"
+  "||"
+] @operator
+
+[
+  "{"
+  "}"
+  "["
+  "]"
+  "("
+  ")"
+] @punctuation.bracket
+
+[
+  "."
+  ".*"
+  ","
+  "[*]"
+] @punctuation.delimiter
+
+[
+  (ellipsis)
+  "?"
+  "=>"
+] @punctuation.special
+
+[
+  ":"
+  "="
+] @none
+
+[
+  "for"
+  "endfor"
+  "in"
+] @keyword.repeat
+
+[
+  "if"
+  "else"
+  "endif"
+] @keyword.conditional
+
+[
+  (quoted_template_start) ; "
+  (quoted_template_end) ; "
+  (template_literal) ; non-interpolation/directive content
+] @string
+
+[
+  (heredoc_identifier) ; END
+  (heredoc_start) ; << or <<-
+] @punctuation.delimiter
+
+[
+  (template_interpolation_start) ; ${
+  (template_interpolation_end) ; }
+  (template_directive_start) ; %{
+  (template_directive_end) ; }
+  (strip_marker) ; ~
+] @punctuation.special
+
+(numeric_lit) @number
+
+(bool_lit) @boolean
+
+(null_lit) @constant
+
+(comment) @comment @spell
+
+(identifier) @variable
+
+(body
+  (block
+    (identifier) @keyword))
+
+(body
+  (block
+    (body
+      (block
+        (identifier) @type))))
+
+(function_call
+  (identifier) @function)
+
+(attribute
+  (identifier) @variable.member)
+
+; { key: val }
+;
+; highlight identifier keys as though they were block attributes
+(object_elem
+  key: (expression
+    (variable_expr
+      (identifier) @variable.member)))
+
+; var.foo, data.bar
+;
+; first element in get_attr is a variable.builtin or a reference to a variable.builtin
+(expression
+  (variable_expr
+    (identifier) @variable.builtin)
+  (get_attr
+    (identifier) @variable.member))
+
+''';
+
 const htmlHighlights = r'''
 ; tree-sitter-html/queries/highlights.scm
 (tag_name) @tag
@@ -1792,6 +1978,160 @@ const iniHighlights = r'''
   (setting_name) @property)
 
 ; (setting_value) @none ; grammar does not support subtypes
+
+''';
+
+const javaHighlights = r'''
+; tree-sitter-java/queries/highlights.scm
+; Variables
+
+(identifier) @variable
+
+; Methods
+
+(method_declaration
+  name: (identifier) @function.method)
+(method_invocation
+  name: (identifier) @function.method)
+(super) @function.builtin
+
+; Annotations
+
+(annotation
+  name: (identifier) @attribute)
+(marker_annotation
+  name: (identifier) @attribute)
+
+"@" @operator
+
+; Types
+
+(type_identifier) @type
+
+(interface_declaration
+  name: (identifier) @type)
+(class_declaration
+  name: (identifier) @type)
+(enum_declaration
+  name: (identifier) @type)
+
+((field_access
+  object: (identifier) @type)
+ (#match? @type "^[A-Z]"))
+((scoped_identifier
+  scope: (identifier) @type)
+ (#match? @type "^[A-Z]"))
+((method_invocation
+  object: (identifier) @type)
+ (#match? @type "^[A-Z]"))
+((method_reference
+  . (identifier) @type)
+ (#match? @type "^[A-Z]"))
+
+(constructor_declaration
+  name: (identifier) @type)
+
+[
+  (boolean_type)
+  (integral_type)
+  (floating_point_type)
+  (floating_point_type)
+  (void_type)
+] @type.builtin
+
+; Constants
+
+((identifier) @constant
+ (#match? @constant "^_*[A-Z][A-Z\\d_]+$"))
+
+; Builtins
+
+(this) @variable.builtin
+
+; Literals
+
+[
+  (hex_integer_literal)
+  (decimal_integer_literal)
+  (octal_integer_literal)
+  (decimal_floating_point_literal)
+  (hex_floating_point_literal)
+] @number
+
+[
+  (character_literal)
+  (string_literal)
+] @string
+(escape_sequence) @string.escape
+
+[
+  (true)
+  (false)
+  (null_literal)
+] @constant.builtin
+
+[
+  (line_comment)
+  (block_comment)
+] @comment
+
+; Keywords
+
+[
+  "abstract"
+  "assert"
+  "break"
+  "case"
+  "catch"
+  "class"
+  "continue"
+  "default"
+  "do"
+  "else"
+  "enum"
+  "exports"
+  "extends"
+  "final"
+  "finally"
+  "for"
+  "if"
+  "implements"
+  "import"
+  "instanceof"
+  "interface"
+  "module"
+  "native"
+  "new"
+  "non-sealed"
+  "open"
+  "opens"
+  "package"
+  "permits"
+  "private"
+  "protected"
+  "provides"
+  "public"
+  "requires"
+  "record"
+  "return"
+  "sealed"
+  "static"
+  "strictfp"
+  "switch"
+  "synchronized"
+  "throw"
+  "throws"
+  "to"
+  "transient"
+  "transitive"
+  "try"
+  "uses"
+  "volatile"
+  "when"
+  "while"
+  "with"
+  "yield"
+] @keyword
 
 ''';
 
@@ -2448,6 +2788,247 @@ const kotlinHighlights = r'''
 
 ''';
 
+const makeHighlights = r'''
+; tree-sitter-make/queries/highlights.scm
+(comment) @comment @spell
+
+(conditional
+  (_
+    [
+      "ifeq"
+      "else"
+      "ifneq"
+      "ifdef"
+      "ifndef"
+    ] @keyword.conditional)
+  "endif" @keyword.conditional)
+
+(rule
+  (targets
+    (word) @function))
+
+(rule
+  (targets) @_target
+  (prerequisites
+    (word) @function
+    (#eq? @_target ".PHONY")))
+
+(rule
+  (targets
+    (word) @function.builtin
+    (#any-of? @function.builtin
+      ".DEFAULT" ".SUFFIXES" ".DELETE_ON_ERROR" ".EXPORT_ALL_VARIABLES" ".IGNORE" ".INTERMEDIATE"
+      ".LOW_RESOLUTION_TIME" ".NOTPARALLEL" ".ONESHELL" ".PHONY" ".POSIX" ".PRECIOUS" ".SECONDARY"
+      ".SECONDEXPANSION" ".SILENT" ".SUFFIXES")))
+
+(rule
+  [
+    "&:"
+    ":"
+    "::"
+    "|"
+  ] @operator)
+
+[
+  "export"
+  "unexport"
+] @keyword.import
+
+(override_directive
+  "override" @keyword)
+
+(include_directive
+  [
+    "include"
+    "-include"
+  ] @keyword.import
+  filenames: (list
+    (word) @string.special.path))
+
+(variable_assignment
+  name: (word) @string.special.symbol
+  [
+    "?="
+    ":="
+    "::="
+    ; ":::="
+    "+="
+    "="
+  ] @operator)
+
+(shell_assignment
+  name: (word) @string.special.symbol
+  "!=" @operator)
+
+(define_directive
+  "define" @keyword
+  name: (word) @string.special.symbol
+  [
+    "="
+    ":="
+    "::="
+    ; ":::="
+    "?="
+    "!="
+  ]? @operator
+  "endef" @keyword)
+
+(variable_assignment
+  (word) @variable.builtin
+  (#any-of? @variable.builtin
+    ".DEFAULT_GOAL" ".EXTRA_PREREQS" ".FEATURES" ".INCLUDE_DIRS" ".RECIPEPREFIX" ".SHELLFLAGS"
+    ".VARIABLES" "MAKEARGS" "MAKEFILE_LIST" "MAKEFLAGS" "MAKE_RESTARTS" "MAKE_TERMERR"
+    "MAKE_TERMOUT" "SHELL"))
+
+; Use string to match bash
+(variable_reference
+  (word) @string) @operator
+
+(shell_function
+  [
+    "$"
+    "("
+    ")"
+  ] @operator
+  "shell" @function.builtin)
+
+(function_call
+  [
+    "$"
+    "("
+    ")"
+  ] @operator)
+
+(substitution_reference
+  [
+    "$"
+    "("
+    ")"
+  ] @operator)
+
+(automatic_variable
+  "$"
+  _ @character.special
+  (#set! priority 105))
+
+(automatic_variable
+  [
+    "$"
+    "("
+    ")"
+  ] @operator
+  (#set! priority 105))
+
+(recipe_line
+  "@" @character.special)
+
+(function_call
+  [
+    "subst"
+    "patsubst"
+    "strip"
+    "findstring"
+    "filter"
+    "filter-out"
+    "sort"
+    "word"
+    "words"
+    "wordlist"
+    "firstword"
+    "lastword"
+    "dir"
+    "notdir"
+    "suffix"
+    "basename"
+    "addsuffix"
+    "addprefix"
+    "join"
+    "wildcard"
+    "realpath"
+    "abspath"
+    "error"
+    "warning"
+    "info"
+    "origin"
+    "flavor"
+    "foreach"
+    "if"
+    "or"
+    "and"
+    "call"
+    "eval"
+    "file"
+    "value"
+  ] @function.builtin)
+
+"\\" @punctuation.special
+
+''';
+
+const nginxHighlights = r'''
+; tree-sitter-nginx/queries/highlights.scm
+(comment) @comment @spell
+
+(value) @variable
+
+(attribute (keyword) @attribute)
+
+[
+  (location_modifier)
+  "="
+] @operator
+
+[
+  (keyword)
+  "location"
+] @keyword
+
+[
+  "if"
+  "map"
+] @keyword.conditional
+
+(directive (keyword) @constant)
+
+(boolean) @boolean
+
+[
+  (auto)
+  (constant)
+  (level)
+  (connection_method)
+  (var)
+  condition: (condition)
+] @variable.builtin
+
+[
+  (string_literal)
+  (quoted_string_literal)
+  (file)
+  (mask)
+] @string
+
+(directive (variable) @variable.parameter)
+
+(directive (variable (keyword) @variable.parameter))
+
+(location_route) @string.special
+";" @punctuation.delimiter
+
+[
+  (numeric_literal)
+  (time)
+  (size)
+  (cpumask)
+] @number
+
+[
+  "{"
+  "}"
+] @punctuation.bracket
+
+''';
+
 const propertiesHighlights = r'''
 ; tree-sitter-properties/queries/highlights.scm
 (comment) @comment
@@ -2637,6 +3218,106 @@ const rubyHighlights = r'''
   "%w("
   "%i("
 ] @punctuation.bracket
+
+''';
+
+const sshConfigHighlights = r'''
+; tree-sitter-ssh-config/queries/highlights.scm
+; Literals
+
+(string) @string
+
+(pattern) @string.regexp
+
+(token) @string.special.symbol
+
+[
+  (number)
+  (bytes)
+  (time)
+] @number
+
+[
+  (kex)
+  (mac)
+  (cipher)
+  (key_sig)
+] @string.special
+
+[
+  ; generic
+  "yes" "no"
+  "ask" "auto"
+  "none" "any"
+  ; CanonicalizeHostname
+  "always"
+  ; ChannelTimeout
+  "global"
+  "agent-connection"
+  "direct-tcpip"
+  "direct-streamlocal@openssh.com"
+  "forwarded-tcpip"
+  "forwarded-streamlocal@openssh.com"
+  "session"
+  "tun-connection"
+  "x11-connection"
+  ; ControlMaster
+  "autoask"
+  ; FingerprintHash
+  "md5" "sha256"
+  ; PubkeyAuthentication
+  "unbound" "host-bound"
+  ; RequestTTY
+  "force"
+  ; SessionType
+  "subsystem" "default"
+  ; ObscureKeystrokeTiming
+  "interval"
+  ; StrictHostKeyChecking
+  "accept-new" "off"
+  ; Tunnel
+  "point-to-point" "ethernet"
+  ; WarnWeakCrypto
+  "no-pq-kex"
+  (ipqos)
+  (verbosity)
+  (facility)
+  (authentication)
+] @constant.builtin
+
+(uri) @markup.link.url
+
+; Keywords
+
+[ "Host" "Match" ] @module
+
+(parameter keyword: _ @keyword)
+
+(host_declaration argument: _ @tag)
+
+(match_declaration
+  (condition criteria: _ @variable.parameter))
+
+"all" @variable.parameter
+
+; Misc
+
+[
+  "SSH_AUTH_SOCK"
+  (variable)
+] @constant
+
+(comment) @comment
+
+; Punctuation
+
+[ "${" "}" ] @punctuation.special
+
+[ "\"" "," ":" "@" ] @punctuation.delimiter
+
+[ "=" "!" "+" "-" "^" ] @operator
+
+[ "*" "?" ] @character.special
 
 ''';
 
@@ -2981,6 +3662,230 @@ const swiftHighlights = r'''
     "<"
     ">"
   ] @punctuation.bracket)
+
+''';
+
+const terraformHighlights = r'''
+; tree-sitter-hcl/queries/nvim/hcl/highlights.scm
+; highlights.scm
+[
+  "!"
+  "*"
+  "/"
+  "%"
+  "+"
+  "-"
+  ">"
+  ">="
+  "<"
+  "<="
+  "=="
+  "!="
+  "&&"
+  "||"
+] @operator
+
+[
+  "{"
+  "}"
+  "["
+  "]"
+  "("
+  ")"
+] @punctuation.bracket
+
+[
+  "."
+  ".*"
+  ","
+  "[*]"
+] @punctuation.delimiter
+
+[
+  (ellipsis)
+  "?"
+  "=>"
+] @punctuation.special
+
+[
+  ":"
+  "="
+] @none
+
+[
+  "for"
+  "endfor"
+  "in"
+] @keyword.repeat
+
+[
+  "if"
+  "else"
+  "endif"
+] @keyword.conditional
+
+[
+  (quoted_template_start) ; "
+  (quoted_template_end) ; "
+  (template_literal) ; non-interpolation/directive content
+] @string
+
+[
+  (heredoc_identifier) ; END
+  (heredoc_start) ; << or <<-
+] @punctuation.delimiter
+
+[
+  (template_interpolation_start) ; ${
+  (template_interpolation_end) ; }
+  (template_directive_start) ; %{
+  (template_directive_end) ; }
+  (strip_marker) ; ~
+] @punctuation.special
+
+(numeric_lit) @number
+
+(bool_lit) @boolean
+
+(null_lit) @constant
+
+(comment) @comment @spell
+
+(identifier) @variable
+
+(body
+  (block
+    (identifier) @keyword))
+
+(body
+  (block
+    (body
+      (block
+        (identifier) @type))))
+
+(function_call
+  (identifier) @function)
+
+(attribute
+  (identifier) @variable.member)
+
+; { key: val }
+;
+; highlight identifier keys as though they were block attributes
+(object_elem
+  key: (expression
+    (variable_expr
+      (identifier) @variable.member)))
+
+; var.foo, data.bar
+;
+; first element in get_attr is a variable.builtin or a reference to a variable.builtin
+(expression
+  (variable_expr
+    (identifier) @variable.builtin)
+  (get_attr
+    (identifier) @variable.member))
+
+; tree-sitter-hcl/queries/nvim/terraform/highlights.scm
+; inherits: hcl
+
+; Terraform specific references
+;
+;
+; local/module/data/var/output
+(expression
+  (variable_expr
+    (identifier) @variable.builtin
+    (#any-of? @variable.builtin "data" "var" "local" "module" "output"))
+  (get_attr
+    (identifier) @variable.member))
+
+; path.root/cwd/module
+(expression
+  (variable_expr
+    (identifier) @type.builtin
+    (#eq? @type.builtin "path"))
+  (get_attr
+    (identifier) @variable.builtin
+    (#any-of? @variable.builtin "root" "cwd" "module")))
+
+; terraform.workspace
+(expression
+  (variable_expr
+    (identifier) @type.builtin
+    (#eq? @type.builtin "terraform"))
+  (get_attr
+    (identifier) @variable.builtin
+    (#eq? @variable.builtin "workspace")))
+
+; Terraform specific keywords
+; FIXME: ideally only for identifiers under a `variable` block to minimize false positives
+((identifier) @type.builtin
+  (#any-of? @type.builtin "bool" "string" "number" "object" "tuple" "list" "map" "set" "any"))
+
+(object_elem
+  val: (expression
+    (variable_expr
+      (identifier) @type.builtin
+      (#any-of? @type.builtin "bool" "string" "number" "object" "tuple" "list" "map" "set" "any"))))
+
+''';
+
+const tomlHighlights = r'''
+; tree-sitter-toml/queries/highlights.scm
+; Properties
+;-----------
+
+(bare_key) @type
+
+(quoted_key) @string
+
+(pair
+  (bare_key)) @property
+
+(pair
+  (dotted_key
+    (bare_key) @property))
+
+; Literals
+;---------
+
+(boolean) @boolean
+
+(comment) @comment
+
+(string) @string
+
+[
+  (integer)
+  (float)
+] @number
+
+[
+  (offset_date_time)
+  (local_date_time)
+  (local_date)
+  (local_time)
+] @string.special
+
+; Punctuation
+;------------
+
+[
+  "."
+  ","
+] @punctuation.delimiter
+
+"=" @operator
+
+[
+  "["
+  "]"
+  "[["
+  "]]"
+  "{"
+  "}"
+] @punctuation.bracket
 
 ''';
 
