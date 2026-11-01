@@ -1,6 +1,7 @@
 // ignore_for_file: non_constant_identifier_names
 
 import 'dart:ffi';
+import 'dart:io';
 
 import 'queries.g.dart';
 import 'tree_sitter_ffi.dart';
@@ -12,12 +13,21 @@ class Language {
     this.highlights, {
     this.extensions = const [],
     this.fileNames = const [],
+    this.fileNamePrefixes = const [],
+    this.pathSuffixes = const [],
   });
 
   final Pointer<TSLanguage> Function() load;
   final String highlights;
   final List<String> extensions;
   final List<String> fileNames;
+
+  /// File names that start with one of these, such as `.env.` for
+  /// `.env.local`.
+  final List<String> fileNamePrefixes;
+
+  /// Absolute paths that end with one of these, such as `/.ssh/config`.
+  final List<String> pathSuffixes;
 }
 
 final languages = [
@@ -25,7 +35,8 @@ final languages = [
     () => tree_sitter_bash(),
     bashHighlights,
     extensions: ['sh', 'bash', 'zsh'],
-    fileNames: ['.bashrc', '.bash_profile', '.zshrc', '.zprofile'],
+    fileNames: ['.bashrc', '.bash_profile', '.zshrc', '.zprofile', '.env'],
+    fileNamePrefixes: ['.env.'],
   ),
   Language(() => tree_sitter_c(), cHighlights, extensions: ['c', 'h']),
   Language(
@@ -36,6 +47,12 @@ final languages = [
   Language(() => tree_sitter_crystal(), crystalHighlights, extensions: ['cr']),
   Language(() => tree_sitter_css(), cssHighlights, extensions: ['css']),
   Language(() => tree_sitter_dart(), dartHighlights, extensions: ['dart']),
+  Language(
+    () => tree_sitter_dockerfile(),
+    dockerfileHighlights,
+    fileNames: ['Dockerfile'],
+    fileNamePrefixes: ['Dockerfile.'],
+  ),
   Language(
     () => tree_sitter_elixir(),
     elixirHighlights,
@@ -52,17 +69,19 @@ final languages = [
     extensions: ['groovy', 'gradle'],
     fileNames: ['Jenkinsfile'],
   ),
+  Language(() => tree_sitter_hcl(), hclHighlights, extensions: ['hcl']),
   Language(
     () => tree_sitter_html(),
     htmlHighlights,
-    extensions: ['html', 'htm'],
+    extensions: ['html', 'htm', 'erb'],
   ),
   Language(
     () => tree_sitter_ini(),
     iniHighlights,
-    extensions: ['ini', 'cfg', 'conf'],
+    extensions: ['ini'],
     fileNames: ['.editorconfig', '.gitconfig'],
   ),
+  Language(() => tree_sitter_java(), javaHighlights, extensions: ['java']),
   Language(
     () => tree_sitter_javascript(),
     javascriptHighlights,
@@ -80,6 +99,13 @@ final languages = [
     extensions: ['kt', 'kts'],
   ),
   Language(
+    () => tree_sitter_make(),
+    makeHighlights,
+    extensions: ['mk'],
+    fileNames: ['Makefile', 'makefile', 'GNUmakefile'],
+  ),
+  Language(() => tree_sitter_nginx(), nginxHighlights, extensions: ['conf']),
+  Language(
     () => tree_sitter_properties(),
     propertiesHighlights,
     extensions: ['properties'],
@@ -90,7 +116,14 @@ final languages = [
     extensions: ['rb', 'rake', 'gemspec'],
     fileNames: ['Gemfile', 'Rakefile'],
   ),
+  Language(
+    () => tree_sitter_ssh_config(),
+    sshConfigHighlights,
+    pathSuffixes: ['/.ssh/config'],
+  ),
   Language(() => tree_sitter_swift(), swiftHighlights, extensions: ['swift']),
+  Language(() => tree_sitter_hcl(), terraformHighlights, extensions: ['tf']),
+  Language(() => tree_sitter_toml(), tomlHighlights, extensions: ['toml']),
   Language(() => tree_sitter_tsx(), tsxHighlights, extensions: ['tsx']),
   Language(
     () => tree_sitter_typescript(),
@@ -110,11 +143,14 @@ final languages = [
 ];
 
 Language? languageForPath(String path) {
+  final absolute = File(path).absolute.path;
   final name = path.split('/').last;
   final dot = name.lastIndexOf('.');
   final extension = dot > 0 ? name.substring(dot + 1) : null;
   for (final language in languages) {
     if (language.fileNames.contains(name) ||
+        language.fileNamePrefixes.any(name.startsWith) ||
+        language.pathSuffixes.any(absolute.endsWith) ||
         (extension != null && language.extensions.contains(extension))) {
       return language;
     }
@@ -157,6 +193,9 @@ external Pointer<TSLanguage> tree_sitter_html();
 @Native<Pointer<TSLanguage> Function()>(assetId: 'package:uim/grammar/ini')
 external Pointer<TSLanguage> tree_sitter_ini();
 
+@Native<Pointer<TSLanguage> Function()>(assetId: 'package:uim/grammar/java')
+external Pointer<TSLanguage> tree_sitter_java();
+
 @Native<Pointer<TSLanguage> Function()>(
   assetId: 'package:uim/grammar/javascript',
 )
@@ -195,3 +234,25 @@ external Pointer<TSLanguage> tree_sitter_xml();
 
 @Native<Pointer<TSLanguage> Function()>(assetId: 'package:uim/grammar/yaml')
 external Pointer<TSLanguage> tree_sitter_yaml();
+
+@Native<Pointer<TSLanguage> Function()>(
+  assetId: 'package:uim/grammar/dockerfile',
+)
+external Pointer<TSLanguage> tree_sitter_dockerfile();
+
+@Native<Pointer<TSLanguage> Function()>(assetId: 'package:uim/grammar/hcl')
+external Pointer<TSLanguage> tree_sitter_hcl();
+
+@Native<Pointer<TSLanguage> Function()>(assetId: 'package:uim/grammar/make')
+external Pointer<TSLanguage> tree_sitter_make();
+
+@Native<Pointer<TSLanguage> Function()>(assetId: 'package:uim/grammar/nginx')
+external Pointer<TSLanguage> tree_sitter_nginx();
+
+@Native<Pointer<TSLanguage> Function()>(
+  assetId: 'package:uim/grammar/ssh_config',
+)
+external Pointer<TSLanguage> tree_sitter_ssh_config();
+
+@Native<Pointer<TSLanguage> Function()>(assetId: 'package:uim/grammar/toml')
+external Pointer<TSLanguage> tree_sitter_toml();
