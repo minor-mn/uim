@@ -8,7 +8,9 @@
 set -eu
 here=$(dirname "$0")
 
-if [ ! -d "$here/uim" ]; then
+# curl から sh に渡したときは $0 が sh になり、here がカレントディレクトリになるので、
+# ファイル名が install.sh のときだけ tar.gz の中とみなす。
+if [ "$(basename "$0")" != install.sh ] || [ ! -d "$here/uim" ]; then
   case "$(uname -s)" in
     Darwin) os=macos ;;
     Linux) os=linux ;;
@@ -26,7 +28,7 @@ if [ ! -d "$here/uim" ]; then
   work=$(mktemp -d)
   trap 'rm -rf "$work"' EXIT
   echo "ダウンロードしています…"
-  curl -fsSL -o "$work/uim.tar.gz" "https://github.com/minor-mn/uim/releases/latest/download/uim-$os-$cpu.tar.gz"
+  curl -fL --progress-bar --connect-timeout 15 --retry 3 -o "$work/uim.tar.gz" "https://github.com/minor-mn/uim/releases/latest/download/uim-$os-$cpu.tar.gz"
   tar -xzf "$work/uim.tar.gz" -C "$work"
   sh "$work/uim/install.sh"
   exit
