@@ -5,10 +5,12 @@ import 'dart:math';
 import 'colors.dart';
 import 'encoding.dart';
 import 'highlight.dart';
+import 'history.dart';
+import 'substitute.dart';
 import 'terminal.dart';
 import 'width.dart';
 
-enum Mode { normal, insert, visual, command }
+enum Mode { normal, insert, visual, command, confirm }
 
 /// A line of text as Unicode code points. Lines are never mutated in place,
 /// so buffer snapshots can share them.
@@ -49,17 +51,52 @@ class _Change {
   final Pos cursorAfter;
 }
 
-class Editor {
-  Editor(String? path) : this._(path, Colors.load());
+/// A `:s` without `g` going through its matches, asking about each one.
+class _Confirm {
+  _Confirm(
+    this.sub,
+    this.regex,
+    this.row,
+    this.lastRow,
+    this.before,
+    this.cursorBefore,
+  );
 
-  Editor._(this.path, Colors colors)
-    : _highlighter = Highlighter.forPath(path, colors) {
+  final Substitute sub;
+  final RegExp regex;
+
+  /// Row of [match], and the last row of the range.
+  int row;
+  final int lastRow;
+
+  /// Buffer and cursor before the command, for the undo entry.
+  final List<Line> before;
+  final Pos cursorBefore;
+
+  /// UTF-16 offset in [row] to look for the next match from.
+  int from = 0;
+
+  /// The match being asked about.
+  Match? match;
+  bool found = false;
+  int count = 0;
+  final changedRows = <int>{};
+  int lastChanged = -1;
+}
+
+class Editor {
+  Editor(String? path) : this._(path, Colors.load(), History.forUser());
+
+  Editor._(this.path, this._colors, this._history)
+    : _highlighter = Highlighter.forPath(path, _colors) {
     _load();
-    final error = colors.error;
+    final error = _colors.error;
     if (error != null) _error(error);
   }
 
   final String? path;
+  final Colors _colors;
+  final History _history;
   final Highlighter? _highlighter;
 
   /// The lines last given to [_highlighter]. Lines are immutable, so
@@ -84,7 +121,34 @@ class Editor {
 
   Mode _mode = Mode.normal;
   Pos _anchor = const Pos(0, 0);
+
+  /// `:` for an Ex command, `/` for a search.
+  String _cmdPrefix = ':';
   String _cmdline = '';
+
+  /// Cursor on the command line, in code points.
+  int _cmdPos = 0;
+
+  /// Pattern of the last `/` search, for `n` and `N`.
+  RegExp? _lastSearch;
+
+  /// Whether matches of [_lastSearch] are colored; `:noh` turns it off until
+  /// the next search.
+  bool _hlsearch = false;
+
+  /// History entries read when the command line opened, oldest first.
+  List<String> _historyEntries = const [];
+
+  /// Entry shown on the command line; `_historyEntries.length` while showing
+  /// what was typed.
+  int _historyIndex = 0;
+
+  /// What was typed before going through the history: only entries starting
+  /// with it are shown.
+  String _historyTyped = '';
+
+  /// The `:s` asking about each match, in [Mode.confirm].
+  _Confirm? _confirm;
   String _message = '';
   bool _messageIsError = false;
 
@@ -172,6 +236,8 @@ class Editor {
         _visualKey(key);
       case Mode.command:
         _commandKey(key);
+      case Mode.confirm:
+        _confirmKey(key);
     }
   }
 
@@ -182,9 +248,12 @@ class Editor {
       _info('Type  :q!  and press <Enter> to abandon all changes and exit uim');
     } else if (_mode == Mode.insert) {
       _leaveInsert();
+    } else if (_mode == Mode.confirm) {
+      // Stops asking, keeping what was replaced so far.
+      _finishConfirm();
     } else {
       _mode = Mode.normal;
-      _cmdline = '';
+      _setCmdline('');
     }
   }
 
@@ -215,10 +284,18 @@ class Editor {
         _undoChange();
       case '<C-r>':
         _redoChange();
-      case ':':
+      case ':' || '/':
         _mode = Mode.command;
-        _cmdline = '';
+        _cmdPrefix = key;
+        _setCmdline('');
         _message = '';
+        // Read each time, for entries added by other uims.
+        _historyEntries = _history.read();
+        _historyIndex = _historyEntries.length;
+      case 'n':
+        _searchAgain(forward: true);
+      case 'N':
+        _searchAgain(forward: false);
     }
   }
 
@@ -304,30 +381,103 @@ class Editor {
     }
   }
 
+  /// Sets the command line to [text], with the cursor at its end.
+  void _setCmdline(String text) {
+    _cmdline = text;
+    _cmdPos = text.runes.length;
+  }
+
+  /// The command line before the cursor.
+  String _cmdBefore() => String.fromCharCodes(_cmdline.runes.take(_cmdPos));
+
+  /// Inserts [text] at the cursor of the command line.
+  void _insertCmd(String text) {
+    final runes = _cmdline.runes.toList();
+    _cmdline = String.fromCharCodes([
+      ...runes.take(_cmdPos),
+      ...text.runes,
+      ...runes.skip(_cmdPos),
+    ]);
+    _cmdPos += text.runes.length;
+    _historyIndex = _historyEntries.length;
+  }
+
   void _commandKey(String key) {
     switch (key) {
       case '<Esc>':
         _mode = Mode.normal;
-        _cmdline = '';
+        _setCmdline('');
       case '<CR>':
         final cmd = _cmdline;
         _mode = Mode.normal;
-        _cmdline = '';
-        _execute(cmd);
+        _setCmdline('');
+        if (_cmdPrefix == '/') {
+          if (cmd.isNotEmpty) _history.add('/$cmd');
+          _startSearch(cmd);
+        } else {
+          // Of `:` commands, only those on every line (`:%s/...`) are kept.
+          if (cmd.startsWith('%')) _history.add(':$cmd');
+          _execute(cmd);
+        }
       case '<BS>':
         if (_cmdline.isEmpty) {
           _mode = Mode.normal;
-        } else {
-          _cmdline = String.fromCharCodes(
-            _cmdline.runes.toList()..removeLast(),
-          );
+        } else if (_cmdPos > 0) {
+          // Deletes the character before the cursor; nothing at the start,
+          // as in vim.
+          final runes = _cmdline.runes.toList()..removeAt(_cmdPos - 1);
+          _cmdline = String.fromCharCodes(runes);
+          _cmdPos--;
+          _historyIndex = _historyEntries.length;
         }
+      case '<Left>':
+        if (_cmdPos > 0) _cmdPos--;
+      case '<Right>':
+        if (_cmdPos < _cmdline.runes.length) _cmdPos++;
+      case '<Up>':
+        _browseHistory(older: true);
+      case '<Down>':
+        _browseHistory(older: false);
       default:
-        if (key.runes.length == 1) _cmdline += key;
+        if (key.runes.length == 1) _insertCmd(key);
     }
   }
 
+  /// `<Up>` / `<Down>` on the command line: shows the previous or next
+  /// history entry for this prompt that starts with what was typed, as vim
+  /// does. Going past the newest one shows what was typed again.
+  void _browseHistory({required bool older}) {
+    final entries = _historyEntries;
+    if (_historyIndex == entries.length) _historyTyped = _cmdline;
+    final start = '$_cmdPrefix$_historyTyped';
+    var i = _historyIndex;
+    while (true) {
+      i += older ? -1 : 1;
+      if (i < 0) return;
+      if (i >= entries.length) {
+        _historyIndex = entries.length;
+        _setCmdline(_historyTyped);
+        return;
+      }
+      if (entries[i].startsWith(start)) break;
+    }
+    _historyIndex = i;
+    _setCmdline(entries[i].substring(_cmdPrefix.length));
+  }
+
   void _execute(String cmd) {
+    // Not trimmed at the end: trailing spaces may be part of a replacement.
+    final Substitute? sub;
+    try {
+      sub = Substitute.parse(cmd.trimLeft());
+    } on FormatException catch (e) {
+      _error(e.message);
+      return;
+    }
+    if (sub != null) {
+      _substitute(sub);
+      return;
+    }
     switch (cmd.trim()) {
       case '':
         break;
@@ -345,9 +495,286 @@ class Editor {
         quit = true;
       case 'wq':
         if (_write(force: false)) quit = true;
+      // :noh, :nohl, ... :nohlsearch
+      case final c when c.length >= 3 && 'nohlsearch'.startsWith(c):
+        _hlsearch = false;
       default:
         _error('E492: Not an editor command: ${cmd.trim()}');
     }
+  }
+
+  /// `:s`: replaces matches in the lines of its range (the cursor line by
+  /// default) as one change, and leaves the cursor on the last changed line,
+  /// as vim does. Its pattern becomes the last search pattern.
+  void _substitute(Substitute sub) {
+    final range = _rows(sub.range);
+    if (range == null) return;
+    final (first, last) = range;
+    final RegExp regex;
+    if (sub.pattern.isEmpty) {
+      final previous = _lastSearch;
+      if (previous == null) {
+        _error('E35: No previous regular expression');
+        return;
+      }
+      regex = RegExp(
+        previous.pattern,
+        unicode: true,
+        caseSensitive: !sub.ignoreCase && previous.isCaseSensitive,
+      );
+    } else {
+      try {
+        regex = RegExp(
+          sub.pattern,
+          unicode: true,
+          caseSensitive: !sub.ignoreCase,
+        );
+      } on FormatException catch (e) {
+        _error('E383: Invalid search string: ${e.message}');
+        return;
+      }
+    }
+    _lastSearch = regex;
+    _hlsearch = true;
+
+    final before = List.of(_lines);
+    final cursorBefore = _cursor;
+    if (!sub.global) {
+      _confirm = _Confirm(sub, regex, first, last, before, cursorBefore);
+      _mode = Mode.confirm;
+      _message = '';
+      _confirmNext();
+      return;
+    }
+    var count = 0;
+    var lines = 0;
+    var lastRow = -1;
+    for (var r = first; r <= last; r++) {
+      final text = String.fromCharCodes(_lines[r]);
+      var n = 0;
+      final out = text.replaceAllMapped(regex, (m) {
+        n++;
+        return sub.expand(m);
+      });
+      if (n == 0) continue;
+      count += n;
+      lines++;
+      lastRow = r;
+      if (out != text) _lines[r] = out.runes.toList();
+    }
+    if (count == 0) {
+      _error('E486: Pattern not found: ${regex.pattern}');
+      return;
+    }
+    _setCursor(Pos(lastRow, _firstNonBlank(_lines[lastRow])));
+    if (!_sameLines(before, _lines)) _record(before, cursorBefore);
+    _reportSubstitutions(count, lines);
+  }
+
+  void _reportSubstitutions(int count, int lines) {
+    if (count > 2) {
+      _info('$count substitutions on $lines line${lines == 1 ? '' : 's'}');
+    }
+  }
+
+  /// Moves to the next match of the `:s` being confirmed, or finishes it
+  /// when there is none.
+  void _confirmNext() {
+    final c = _confirm!;
+    while (c.row <= c.lastRow) {
+      final text = String.fromCharCodes(_lines[c.row]);
+      if (c.from <= text.length) {
+        final m = c.regex.allMatches(text, c.from).firstOrNull;
+        if (m != null) {
+          c
+            ..match = m
+            ..found = true;
+          _setCursor(Pos(c.row, _colAt(_lines[c.row], m.start)));
+          return;
+        }
+      }
+      c.row++;
+      c.from = 0;
+    }
+    _finishConfirm();
+  }
+
+  /// `y` or Enter replaces the match, `n` skips it, Esc stops.
+  void _confirmKey(String key) {
+    final c = _confirm!;
+    final m = c.match!;
+    final text = m.input;
+    switch (key) {
+      case 'y' || '<CR>':
+        final replacement = c.sub.expand(m);
+        final out =
+            text.substring(0, m.start) + replacement + text.substring(m.end);
+        _lines[c.row] = out.runes.toList();
+        c.count++;
+        c.changedRows.add(c.row);
+        c.lastChanged = c.row;
+        // Not inside the replacement.
+        c.from = _nextFrom(out, m.start + replacement.length, m);
+      case 'n':
+        c.from = _nextFrom(text, m.end, m);
+      case '<Esc>':
+        _finishConfirm();
+        return;
+      default:
+        return;
+    }
+    _confirmNext();
+  }
+
+  /// Where to look for the match after [m], which ends at [end] in [text]:
+  /// one character further after an empty match, so it is not found again.
+  static int _nextFrom(String text, int end, Match m) {
+    if (m.end > m.start) return end;
+    if (end >= text.length) return text.length + 1;
+    final unit = text.codeUnitAt(end);
+    return end + (unit >= 0xd800 && unit < 0xdc00 ? 2 : 1);
+  }
+
+  String _confirmPrompt() {
+    final c = _confirm;
+    final m = c?.match;
+    if (c == null || m == null) return '';
+    return 'replace with ${c.sub.expand(m)}? (Y/n)';
+  }
+
+  /// Ends the `:s` being confirmed: what was replaced becomes one change.
+  void _finishConfirm() {
+    final c = _confirm!;
+    _confirm = null;
+    _mode = Mode.normal;
+    if (!c.found) {
+      _setCursor(c.cursorBefore);
+      _error('E486: Pattern not found: ${c.regex.pattern}');
+      return;
+    }
+    if (c.count == 0) {
+      _setCursor(c.cursorBefore);
+      return;
+    }
+    _setCursor(Pos(c.lastChanged, _firstNonBlank(_lines[c.lastChanged])));
+    if (!_sameLines(c.before, _lines)) _record(c.before, c.cursorBefore);
+    _reportSubstitutions(c.count, c.changedRows.length);
+  }
+
+  /// Rows of a command range (see [Substitute.range]), or null after showing
+  /// an error.
+  (int, int)? _rows((String, String?)? range) {
+    if (range == null) return (_row, _row);
+    final (a, b) = range;
+    if (a == '%') return (0, _lines.length - 1);
+    int row(String address) => switch (address) {
+      '.' => _row,
+      r'$' => _lines.length - 1,
+      // Line 0 means line 1 here, as in vim.
+      _ => max(1, int.parse(address)) - 1,
+    };
+    final first = row(a);
+    final last = b == null ? first : row(b);
+    if (first >= _lines.length || last >= _lines.length) {
+      _error('E16: Invalid range');
+      return null;
+    }
+    if (first > last) {
+      _error('E493: Backwards range given');
+      return null;
+    }
+    return (first, last);
+  }
+
+  /// `/` followed by Enter: searches for [text], a Dart (JavaScript-style)
+  /// regular expression. An empty [text] repeats the last search, as in vim.
+  void _startSearch(String text) {
+    if (text.isNotEmpty) {
+      try {
+        _lastSearch = RegExp(text, unicode: true);
+      } on FormatException catch (e) {
+        _error('E383: Invalid search string: ${e.message}');
+        return;
+      }
+    }
+    _searchAgain(forward: true);
+  }
+
+  /// Moves to the next match of the last search, wrapping around the end of
+  /// the buffer.
+  void _searchAgain({required bool forward}) {
+    final pattern = _lastSearch;
+    if (pattern == null) {
+      _error('E35: No previous regular expression');
+      return;
+    }
+    _hlsearch = true;
+    final shown = '${forward ? '/' : '?'}${pattern.pattern}';
+    final n = _lines.length;
+    // The last step comes back to the cursor line, for a match on the other
+    // side of the cursor.
+    for (var i = 0; i <= n; i++) {
+      final r = forward ? _row + i : _row - i;
+      final line = _lines[r % n];
+      final col = forward
+          ? _indexOf(line, pattern, i == 0 ? _col + 1 : 0)
+          : _lastIndexOf(line, pattern, i == 0 ? _col - 1 : line.length);
+      if (col < 0) continue;
+      _setCursor(Pos(r % n, col));
+      if (r >= n) {
+        _info('search hit BOTTOM, continuing at TOP');
+      } else if (r < 0) {
+        _info('search hit TOP, continuing at BOTTOM');
+      } else {
+        _info(shown);
+      }
+      return;
+    }
+    _error('E486: Pattern not found: ${pattern.pattern}');
+  }
+
+  /// First column at or after [from] where [pattern] matches in [line], or
+  /// -1. The text before [from] still counts for `\b` and lookbehind.
+  static int _indexOf(Line line, RegExp pattern, int from) {
+    if (from > line.length) return -1;
+    final text = String.fromCharCodes(line);
+    final m = pattern.allMatches(text, _utf16Offset(line, from)).firstOrNull;
+    return m == null ? -1 : _colAt(line, m.start);
+  }
+
+  /// Last column at or before [before] where [pattern] matches in [line], or
+  /// -1. Overlapping matches count, as in vim.
+  static int _lastIndexOf(Line line, RegExp pattern, int before) {
+    final text = String.fromCharCodes(line);
+    var found = -1;
+    var col = 0;
+    while (col <= min(before, line.length)) {
+      final m = pattern.allMatches(text, _utf16Offset(line, col)).firstOrNull;
+      if (m == null) break;
+      final c = _colAt(line, m.start);
+      if (c > before) break;
+      found = c;
+      col = c + 1;
+    }
+    return found;
+  }
+
+  /// UTF-16 offset of column [col] in [line].
+  static int _utf16Offset(Line line, int col) {
+    var offset = 0;
+    for (var i = 0; i < col; i++) {
+      offset += line[i] > 0xffff ? 2 : 1;
+    }
+    return offset;
+  }
+
+  /// Column of UTF-16 offset [offset] in [line].
+  static int _colAt(Line line, int offset) {
+    var col = 0;
+    for (var o = 0; o < offset; col++) {
+      o += line[col] > 0xffff ? 2 : 1;
+    }
+    return col;
   }
 
   bool _move(String key) {
@@ -557,8 +984,8 @@ class Editor {
         _setCursor(Pos(end.row, end.col - 1));
         _record(before, cursorBefore);
       case Mode.command:
-        _cmdline += String.fromCharCodes(parts.first);
-      case Mode.visual:
+        _insertCmd(String.fromCharCodes(parts.first));
+      case Mode.visual || Mode.confirm:
         break;
     }
   }
@@ -758,7 +1185,7 @@ class Editor {
     for (var i = 0; i < textRows; i++) {
       final r = _top + i;
       if (r < _lines.length) {
-        _renderLine(sb, r, cols, sel, styles?[i]);
+        _renderLine(sb, r, cols, sel, styles?[i], _matches(r));
       } else {
         sb.write('\x1b[94m~\x1b[0m');
       }
@@ -767,10 +1194,12 @@ class Editor {
 
     _renderStatus(sb, cols);
 
-    final (y, x) = _mode == Mode.command
-        ? (rows, min(cols, stringWidth(':$_cmdline') + 1))
-        : (_row - _top + 1, curDisp - _left + 1);
-    sb.write('\x1b[$y;${x}H\x1b[?25h');
+    // On the command line, the status line shows the cursor as a reversed
+    // character, and the terminal's cursor stays hidden so that it does not
+    // reverse it back.
+    if (_mode != Mode.command) {
+      sb.write('\x1b[${_row - _top + 1};${curDisp - _left + 1}H\x1b[?25h');
+    }
     return sb.toString();
   }
 
@@ -785,20 +1214,56 @@ class Editor {
     final showRight = rightWidth + 2 <= cols;
     final leftCols = showRight ? cols - rightWidth - 1 : cols;
     final (left, style) = switch (_mode) {
-      Mode.command => (':$_cmdline', ''),
+      Mode.command => ('$_cmdPrefix$_cmdline', ''),
       Mode.insert => ('-- INSERT --', '\x1b[1m'),
       Mode.visual => ('-- VISUAL --', '\x1b[1m'),
+      Mode.confirm => (_confirmPrompt(), ''),
       Mode.normal => (_message, _messageIsError ? '\x1b[97;41m' : ''),
     };
-    final text = fitWidth(left, leftCols);
     sb
       ..write(bar)
-      ..write(style)
-      ..write(text)
+      ..write(style);
+    final used = _mode == Mode.command
+        ? _writeCmdline(sb, leftCols)
+        : _writeFitted(sb, left, leftCols);
+    sb
       ..write(bar)
-      ..write(' ' * (leftCols - stringWidth(text)));
+      ..write(' ' * (leftCols - used));
     if (showRight) sb.write(' $right');
     sb.write('\x1b[0m');
+  }
+
+  /// Writes as much of [text] as fits in [cols] and returns its width.
+  static int _writeFitted(StringBuffer sb, String text, int cols) {
+    final fitted = fitWidth(text, cols);
+    sb.write(fitted);
+    return stringWidth(fitted);
+  }
+
+  /// Writes the command line in [cols] with the character at the cursor
+  /// reversed (a space after the end), and returns its width. When it does
+  /// not fit, its start is cut so that the cursor stays in view.
+  int _writeCmdline(StringBuffer sb, int cols) {
+    final runes = _cmdline.runes.toList();
+    final at = _cmdPos < runes.length
+        ? String.fromCharCode(runes[_cmdPos])
+        : ' ';
+    final atWidth = stringWidth(at);
+    final beforeRunes = '$_cmdPrefix${_cmdBefore()}'.runes.toList();
+    var skip = 0;
+    while (skip < beforeRunes.length &&
+        stringWidth(String.fromCharCodes(beforeRunes.skip(skip))) + atWidth >
+            cols) {
+      skip++;
+    }
+    final before = String.fromCharCodes(beforeRunes.skip(skip));
+    var used = _writeFitted(sb, before, cols);
+    if (used + atWidth > cols) return used;
+    sb.write('\x1b[7m');
+    used += _writeFitted(sb, at, cols - used);
+    sb.write('\x1b[27m');
+    final after = String.fromCharCodes(runes.skip(_cmdPos + 1));
+    return used + _writeFitted(sb, after, cols - used);
   }
 
   List<List<String?>>? _styles(int first, int last) {
@@ -819,17 +1284,47 @@ class Editor {
     return true;
   }
 
+  /// Column ranges (start inclusive, end exclusive) of the search matches in
+  /// row [r], left to right; empty when search highlighting is off. Matches
+  /// do not overlap, and empty ones are left out as they have nothing to
+  /// color.
+  List<(int, int)> _matches(int r) {
+    final pattern = _lastSearch;
+    if (!_hlsearch || pattern == null) return const [];
+    final line = _lines[r];
+    return [
+      for (final m in pattern.allMatches(String.fromCharCodes(line)))
+        if (m.end > m.start) (_colAt(line, m.start), _colAt(line, m.end)),
+    ];
+  }
+
   void _renderLine(
     StringBuffer sb,
     int r,
     int cols,
     (Pos, Pos)? sel,
     List<String?>? styles,
+    List<(int, int)> matches,
   ) {
     bool selected(int c) {
       if (sel == null) return false;
       final p = Pos(r, c);
       return sel.$1.compareTo(p) <= 0 && p.compareTo(sel.$2) <= 0;
+    }
+
+    final matchStyle = _colors.searchStyle(current: false);
+    final currentStyle = _colors.searchStyle(current: true);
+    var m = 0;
+
+    /// Search style of column [c] (columns are asked for in order), or null.
+    String? searchStyle(int c) {
+      while (m < matches.length && matches[m].$2 <= c) {
+        m++;
+      }
+      if (m == matches.length || c < matches[m].$1) return null;
+      final (start, end) = matches[m];
+      final current = r == _row && start <= _col && _col < end;
+      return current ? currentStyle : matchStyle;
     }
 
     final line = _lines[r];
@@ -845,13 +1340,17 @@ class Editor {
       if (d <= _left && w > 0) continue;
       if (start >= right) break;
       final rev = selected(i);
-      final s = styles?[i] == '' ? null : styles?[i];
-      if (rev != reversed || s != style) {
+      // The search colors go after the syntax color, so they win.
+      final s = [
+        styles?[i],
+        searchStyle(i),
+      ].where((s) => s != null && s.isNotEmpty).join(';');
+      if (rev != reversed || (s.isEmpty ? null : s) != style) {
         sb.write('\x1b[0m');
         if (rev) sb.write('\x1b[7m');
-        if (s != null) sb.write('\x1b[${s}m');
+        if (s.isNotEmpty) sb.write('\x1b[${s}m');
         reversed = rev;
-        style = s;
+        style = s.isEmpty ? null : s;
       }
       if (start < _left || d > right) {
         // Partially visible wide character or tab.

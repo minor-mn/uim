@@ -7,9 +7,11 @@ const defaultColors = r'''
 // Copy this file to ~/.config/uim/color.json5 and edit it. Keys you leave out
 // keep these defaults, so you can also keep only the keys you change.
 //
-// Keys are capture names used by the tree-sitter highlight queries.
+// Keys are capture names used by the tree-sitter highlight queries, except
+// the "search." keys at the top.
 // Values:
-//   "#ff8000"         a 24-bit color
+//   "#ff8000"         a 24-bit color (the background color for keys ending
+//                     in ".background")
 //   "35"              SGR parameters: 30-37 and 90-97 are the terminal's
 //                     theme colors, 1 bold, 3 italic, 4 underline; combine
 //                     with ";" as in "1;35" or "1;38;2;255;128;0"
@@ -18,6 +20,13 @@ const defaultColors = r'''
 //   null              same as the parent name, which is the name without its
 //                     last ".part" ("keyword.return" -> "keyword")
 {
+  // Text matching the last / search (:noh hides it until the next search)
+  "search.foreground": "#ddddff",
+  "search.background": "#111122",
+  // The match the cursor is on
+  "search.current.foreground": "#eeeeff",
+  "search.current.background": "#333344",
+
   // Attributes and annotations (@override, HTML attribute names)
   "attribute": "#e5e510",
 

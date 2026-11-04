@@ -41,7 +41,8 @@ class Colors {
     return styles;
   }
 
-  /// Turns `#rrggbb` into the SGR parameters of that 24-bit color.
+  /// Turns `#rrggbb` into the SGR parameters of that 24-bit color, as the
+  /// background color for keys ending in `.background`.
   static String _rgb(String key, String value) {
     final match = RegExp(
       r'^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$',
@@ -52,7 +53,17 @@ class Colors {
     final [r, g, b] = [
       for (var i = 1; i <= 3; i++) int.parse(match.group(i)!, radix: 16),
     ];
-    return '38;2;$r;$g;$b';
+    return '${key.endsWith('.background') ? 48 : 38};2;$r;$g;$b';
+  }
+
+  /// SGR parameters for text matching the search: the current match (the one
+  /// the cursor is on) or another one.
+  String searchStyle({required bool current}) {
+    final prefix = current ? 'search.current' : 'search';
+    return [
+      _styles['$prefix.foreground'],
+      _styles['$prefix.background'],
+    ].where((s) => s != null && s.isNotEmpty).join(';');
   }
 
   final Map<String, String?> _styles;

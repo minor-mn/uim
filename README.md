@@ -42,6 +42,27 @@ curl -fsSL https://raw.githubusercontent.com/minor-mn/uim/main/scripts/uninstall
 | `p` | ペースト |
 | `u` `Ctrl-r` | アンドゥ・リドゥ |
 | 矢印・PageUp・PageDown | 移動 |
+| `/` `n` `N` | 検索（Dart の正規表現。書き方は JavaScript と同じです） |
+| `:noh` | 検索のマッチの色を消す（次に検索すると、また付きます） |
+| `/` `:` の入力中の `↑` `↓` | ヒストリーをたどる（途中まで入力していれば、それで始まるものだけ） |
+| `/` `:` の入力中の `←` `→` | カーソルを動かす（文字の入力と BS はカーソルの位置で効きます） |
+| `:s/パターン/置換後/フラグ` | 置換（下を参照） |
+
+ヒストリーは `~/.local/state/uim/history` に新しい 100 件まで残り、どの uim からも同じものを使います。`/` の検索と、`:%` で始まるコマンド（`:%s/.../.../` など）を残します。ほかの `:` のコマンド（`:w` など）は残しません。`/` の入力中は `/` のものだけ、`:` の入力中は `:` のものだけをたどります。
+
+### 置換
+
+```
+:%s/\wxport (\w+)/import $1/g
+```
+
+- パターンは `/` の検索と同じ Dart の正規表現です。空にすると、最後に検索したパターンを使います。
+- 置換後の文字列では、JavaScript と同じく `$1`〜`$99`（グループ）、`$<名前>`（名前付きグループ）、`$&`（マッチ全体）、`$$`（`$` そのもの）が使えます。
+- 範囲: なし（カーソルの行）、`%`（全部の行）、`3`、`3,10`。行番号の代わりに `.`（カーソルの行）と `$`（最後の行）も書けます。
+- フラグ: `g`（確認せずに全部置き換える）、`i`（大文字と小文字を区別しない）。
+- `g` がないときは、マッチを1つずつ見せて `replace with import? (Y/n)` と聞きます。`y` か Enter で置き換え、`n` で飛ばし、Esc でそこまでで終えます（置き換えた分は残ります）。vim の `c` フラグに近い動きで、vim の「`g` なしは各行の最初の1つだけ」とは違います。
+- 区切りは `/` 以外に `#` なども使えます（`:%s#/usr#/opt#`）。区切りと同じ文字は `\/` のように書きます。
+- 1回の置換は `u` 1回で元に戻ります。
 | `:w` `:w!` `:q` `:q!` `:wq` | 保存・終了 |
 
 [fm-ee2e](https://github.com/minor-mn/fm-ee2e-swift) の中で動かすと、ローカルと SSH の先（2段目も）の uim どうしで、コピーした内容を `p` で貼れます。
@@ -75,6 +96,8 @@ curl -fsSL https://raw.githubusercontent.com/minor-mn/uim/main/scripts/uninstall
 ## 色
 
 `~/.config/uim/color.json5` で変えられます。書き方はファイルの先頭にあります。書かなかった色は既定のまま（[config/color.json5](config/color.json5)）です。
+
+検索でマッチした文字列の色は `search.foreground` `search.background`、カーソルのあるマッチの色は `search.current.foreground` `search.current.background` です。`.background` で終わるキーに書いた `#rrggbb` は背景色になります。
 
 対応している言語は [lib/src/languages.dart](lib/src/languages.dart) にあります。
 
