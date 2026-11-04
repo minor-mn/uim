@@ -1,11 +1,10 @@
-# v から始まるタグ（v1.0.0 など）を push すると、macOS（Apple Silicon）と Linux（x64・arm64）向けにビルドし、
-# それぞれを tar.gz にして、そのタグの Release に添付する。
+# GitHub で Release を公開すると、macOS（Apple Silicon）と Linux（x64・arm64）向けにビルドし、
+# それぞれを tar.gz にして、その Release に添付する。
 name: release
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -59,7 +58,9 @@ jobs:
         with:
           merge-multiple: true
 
-      - name: Create release
+      # --clobber: ジョブをやり直したときに、途中まで添付したものを上書きできるようにする。
+      - name: Upload to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" uim-*.tar.gz --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" uim-*.tar.gz --repo "$GITHUB_REPOSITORY" --clobber
