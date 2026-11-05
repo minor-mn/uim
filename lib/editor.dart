@@ -274,6 +274,10 @@ class Editor {
     }
   }
 
+  /// Spaces the Tab key types in insert mode, and BS deletes at once in an
+  /// indent of spaces.
+  static const _tabSpaces = 2;
+
   /// Keys treated as another key in normal and visual modes.
   static String _alias(String key) => key == 'x' ? 'd' : key;
 
@@ -371,9 +375,15 @@ class Editor {
         _autoIndentRow = indent.isEmpty ? null : _row;
       case '<BS>':
         if (_col > 0) {
+          // With only spaces before the cursor, a multiple of what Tab types,
+          // deletes as many as Tab types.
+          final n =
+              _col % _tabSpaces == 0 && line.take(_col).every((c) => c == 0x20)
+              ? _tabSpaces
+              : 1;
           // Like vim, deleting part of the indent still lets it be dropped.
-          _lines[_row] = [...line.sublist(0, _col - 1), ...line.sublist(_col)];
-          _setCursor(Pos(_row, _col - 1));
+          _lines[_row] = [...line.sublist(0, _col - n), ...line.sublist(_col)];
+          _setCursor(Pos(_row, _col - n));
         } else if (_row > 0) {
           _autoIndentRow = null;
           final prev = _lines[_row - 1];
@@ -385,8 +395,9 @@ class Editor {
       default:
         if (key.runes.length != 1) return;
         _autoIndentRow = null;
-        // Tab types two spaces.
-        final text = key == '\t' ? const [0x20, 0x20] : key.runes.toList();
+        final text = key == '\t'
+            ? List.filled(_tabSpaces, 0x20)
+            : key.runes.toList();
         _lines[_row] = [
           ...line.sublist(0, _col),
           ...text,
