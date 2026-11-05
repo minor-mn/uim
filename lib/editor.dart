@@ -6,6 +6,7 @@ import 'colors.dart';
 import 'encoding.dart';
 import 'highlight.dart';
 import 'history.dart';
+import 'positions.dart';
 import 'substitute.dart';
 import 'terminal.dart';
 import 'width.dart';
@@ -85,11 +86,13 @@ class _Confirm {
 }
 
 class Editor {
-  Editor(String? path) : this._(path, Colors.load(), History.forUser());
+  Editor(String? path)
+    : this._(path, Colors.load(), History.forUser(), Positions.forUser());
 
-  Editor._(this.path, this._colors, this._history)
+  Editor._(this.path, this._colors, this._history, this._positions)
     : _highlighter = Highlighter.forPath(path, _colors) {
     _load();
+    _restorePosition();
     final error = _colors.error;
     if (error != null) _error(error);
   }
@@ -97,6 +100,7 @@ class Editor {
   final String? path;
   final Colors _colors;
   final History _history;
+  final Positions _positions;
   final Highlighter? _highlighter;
 
   /// The lines last given to [_highlighter]. Lines are immutable, so
@@ -160,6 +164,10 @@ class Editor {
   List<Line> _insertBefore = const [];
   Pos _insertCursor = const Pos(0, 0);
 
+  /// Line given an indent by `<CR>` in insert mode with nothing typed on it
+  /// since, whose indent is removed again on leaving it ([_dropAutoIndent]).
+  int? _autoIndentRow;
+
   final _undo = <_Change>[];
   final _redo = <_Change>[];
   int _nextId = 1;
@@ -170,6 +178,10 @@ class Editor {
 
   /// Height of the text area at the last render.
   int _textRows = 1;
+
+  /// The next render shows the cursor line in the middle of the screen if it
+  /// would be off the screen, for the position restored when opening a file.
+  bool _centerOnRender = false;
 
   bool quit = false;
 
@@ -193,6 +205,27 @@ class Editor {
   Pos get _cursor => Pos(_row, _col);
   int get _currentId => _undo.isEmpty ? 0 : _undo.last.id;
   bool get modified => _currentId != _savedId;
+
+  /// Moves the cursor to where the file was left last time, as vim's
+  /// defaults.vim does: not if that line no longer exists, and to the end of
+  /// the line if it is now shorter.
+  void _restorePosition() {
+    final p = path;
+    if (p == null) return;
+    final pos = _positions.get(p);
+    if (pos == null) return;
+    final (row, col) = pos;
+    if (row >= _lines.length) return;
+    _setCursor(Pos(row, col));
+    _centerOnRender = true;
+  }
+
+  /// Quits, remembering where the cursor was for the next time.
+  void _quit() {
+    final p = path;
+    if (p != null) _positions.set(p, _row, _col);
+    quit = true;
+  }
 
   void _load() {
     final p = path;
@@ -229,17 +262,20 @@ class Editor {
     }
     switch (_mode) {
       case Mode.normal:
-        _normalKey(key);
+        _normalKey(_alias(key));
       case Mode.insert:
         _insertKey(key);
       case Mode.visual:
-        _visualKey(key);
+        _visualKey(_alias(key));
       case Mode.command:
         _commandKey(key);
       case Mode.confirm:
         _confirmKey(key);
     }
   }
+
+  /// Keys treated as another key in normal and visual modes.
+  static String _alias(String key) => key == 'x' ? 'd' : key;
 
   /// Called on Ctrl-C.
   void interrupt() {
@@ -308,22 +344,38 @@ class Editor {
   }
 
   void _insertKey(String key) {
-    if (_move(key)) return;
+    final row = _row;
+    if (_move(key)) {
+      if (_row != row) {
+        _dropAutoIndent();
+      } else {
+        _autoIndentRow = null;
+      }
+      return;
+    }
     final line = _lines[_row];
     switch (key) {
       case '<Esc>':
         _leaveInsert();
       case '<CR>':
+        // The new line starts with the indent of this one (only the part
+        // before the cursor, when it is inside the indent).
+        final indent = line.sublist(0, min(_firstNonBlank(line), _col));
+        _dropAutoIndent();
+        final current = _lines[_row];
         _lines.replaceRange(_row, _row + 1, [
-          line.sublist(0, _col),
-          line.sublist(_col),
+          current.sublist(0, _col),
+          [...indent, ...current.sublist(_col)],
         ]);
-        _setCursor(Pos(_row + 1, 0));
+        _setCursor(Pos(_row + 1, indent.length));
+        _autoIndentRow = indent.isEmpty ? null : _row;
       case '<BS>':
         if (_col > 0) {
+          // Like vim, deleting part of the indent still lets it be dropped.
           _lines[_row] = [...line.sublist(0, _col - 1), ...line.sublist(_col)];
           _setCursor(Pos(_row, _col - 1));
         } else if (_row > 0) {
+          _autoIndentRow = null;
           final prev = _lines[_row - 1];
           _lines.replaceRange(_row - 1, _row + 1, [
             [...prev, ...line],
@@ -332,16 +384,33 @@ class Editor {
         }
       default:
         if (key.runes.length != 1) return;
+        _autoIndentRow = null;
+        // Tab types two spaces.
+        final text = key == '\t' ? const [0x20, 0x20] : key.runes.toList();
         _lines[_row] = [
           ...line.sublist(0, _col),
-          ...key.runes,
+          ...text,
           ...line.sublist(_col),
         ];
-        _setCursor(Pos(_row, _col + 1));
+        _setCursor(Pos(_row, _col + text.length));
     }
   }
 
+  /// Empties the line given an indent by `<CR>` if nothing but that indent
+  /// is on it, as vim does on leaving the line (Esc, `<CR>`, or moving to
+  /// another line) without typing anything there.
+  void _dropAutoIndent() {
+    final row = _autoIndentRow;
+    _autoIndentRow = null;
+    if (row == null) return;
+    final line = _lines[row];
+    if (_firstNonBlank(line) < line.length) return;
+    _lines[row] = <int>[];
+    if (_row == row) _setCursor(Pos(row, 0));
+  }
+
   void _leaveInsert() {
+    _dropAutoIndent();
     _mode = Mode.normal;
     _setCursor(Pos(_row, _col - 1));
     if (!_sameLines(_insertBefore, _lines)) {
@@ -489,12 +558,12 @@ class Editor {
         if (modified) {
           _error('E37: No write since last change (add ! to override)');
         } else {
-          quit = true;
+          _quit();
         }
       case 'q!':
-        quit = true;
+        _quit();
       case 'wq':
-        if (_write(force: false)) quit = true;
+        if (_write(force: false)) _quit();
       // :noh, :nohl, ... :nohlsearch
       case final c when c.length >= 3 && 'nohlsearch'.startsWith(c):
         _hlsearch = false;
@@ -975,6 +1044,7 @@ class Editor {
     ];
     switch (_mode) {
       case Mode.insert:
+        _autoIndentRow = null;
         _setCursor(_insertText(_cursor, parts));
       case Mode.normal:
         _pendingOp = null;
@@ -1168,6 +1238,12 @@ class Editor {
   /// Returns the escape sequences that draw the whole screen.
   String render(int rows, int cols) {
     final textRows = _textRows = max(1, rows - 1);
+    if (_centerOnRender) {
+      _centerOnRender = false;
+      if (_row < _top || _row >= _top + textRows) {
+        _top = max(0, _row - textRows ~/ 2);
+      }
+    }
     if (_row < _top) _top = _row;
     if (_row >= _top + textRows) _top = _row - textRows + 1;
 
