@@ -1,11 +1,12 @@
 /// Display width helpers. Columns are counted in terminal cells.
 library;
 
-const tabStop = 8;
+/// Cells a tab takes, wherever it is (not up to the next tab stop).
+const tabWidth = 4;
 
 /// Width in cells of [rune] when it starts at display column [disp].
 int cellWidth(int rune, int disp) {
-  if (rune == 0x09) return tabStop - disp % tabStop;
+  if (rune == 0x09) return tabWidth;
   if (rune < 0x20 || rune == 0x7f) return 2; // shown as ^X
   if (_isZeroWidth(rune)) return 0;
   return _isWide(rune) ? 2 : 1;
