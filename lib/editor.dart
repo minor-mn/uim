@@ -262,11 +262,12 @@ class Editor {
     }
     switch (_mode) {
       case Mode.normal:
-        _normalKey(_alias(key));
+        _normalKey(key);
       case Mode.insert:
         _insertKey(key);
       case Mode.visual:
-        _visualKey(_alias(key));
+        // `x` deletes the selection, as `d` does.
+        _visualKey(key == 'x' ? 'd' : key);
       case Mode.command:
         _commandKey(key);
       case Mode.confirm:
@@ -277,9 +278,6 @@ class Editor {
   /// Spaces the Tab key types in insert mode, and BS deletes at once in an
   /// indent of spaces.
   static const _tabSpaces = 2;
-
-  /// Keys treated as another key in normal and visual modes.
-  static String _alias(String key) => key == 'x' ? 'd' : key;
 
   /// Called on Ctrl-C.
   void interrupt() {
@@ -318,6 +316,8 @@ class Editor {
         _pendingOp = 'y';
       case 'd':
         _pendingOp = 'd';
+      case 'x':
+        _deleteChar();
       case 'p':
         _requestPaste();
       case 'u':
@@ -968,6 +968,19 @@ class Editor {
     }
     final row = min(_row, _lines.length - 1);
     _setCursor(Pos(row, _firstNonBlank(_lines[row])));
+    _record(before, cursorBefore);
+  }
+
+  /// `x`: deletes the character under the cursor into the register, as vim
+  /// does. Nothing happens on an empty line.
+  void _deleteChar() {
+    final line = _lines[_row];
+    if (line.isEmpty) return;
+    _setRegister(_Register([line.sublist(_col, _col + 1)], linewise: false));
+    final before = List.of(_lines);
+    final cursorBefore = _cursor;
+    _lines[_row] = [...line.sublist(0, _col), ...line.sublist(_col + 1)];
+    _setCursor(_cursor);
     _record(before, cursorBefore);
   }
 
