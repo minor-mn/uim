@@ -41,7 +41,8 @@ curl -fsSL https://raw.githubusercontent.com/minor-mn/uim/main/scripts/uninstall
 | 挿入モードの Enter | 改行して、その行の行頭の空白（インデント）を次の行にも入れる。その行に何も書かずに Esc・Enter・ほかの行への移動をすると、入れた空白は消える（vim と同じ） |
 | `v` | 範囲選択 |
 | `y` `yy` | コピー |
-| `d` `dd` | 削除（`x` も `d` と同じです。`xx` `dx` `xd` も1行削除） |
+| `d` `dd` | 削除（範囲選択中は `x` も `d` と同じ） |
+| `x` | カーソル位置の1文字を削除（vim と同じ。`xx` で2文字） |
 | `p` | ペースト |
 | `u` `Ctrl-r` | アンドゥ・リドゥ |
 | 矢印・PageUp・PageDown | 移動 |
