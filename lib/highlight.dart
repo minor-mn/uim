@@ -180,8 +180,11 @@ class Highlighter {
       suffix++;
     }
     if (prefix == old.length && prefix == text.length) return;
-    // Keep the edit on UTF-8 character boundaries.
-    while (prefix > 0 && old[prefix] & 0xc0 == 0x80) {
+    // Keep the edit on UTF-8 character boundaries. The end of [old], as when
+    // lines are added after the last one, is always a boundary.
+    while (prefix > 0 &&
+        prefix < old.length &&
+        old[prefix] & 0xc0 == 0x80) {
       prefix--;
     }
     while (suffix > 0 && old[old.length - suffix] & 0xc0 == 0x80) {
