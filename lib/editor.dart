@@ -158,6 +158,9 @@ class Editor {
 
   /// First key of `yy` or `dd` while waiting for the second one.
   String? _pendingOp;
+
+  /// Count typed before a command, such as the 3 of `3yy`.
+  int? _count;
   _Register? _register;
 
   /// Buffer and cursor when insert mode started, for the undo entry.
@@ -282,6 +285,7 @@ class Editor {
   /// Called on Ctrl-C.
   void interrupt() {
     _pendingOp = null;
+    _count = null;
     if (_mode == Mode.normal) {
       _info('Type  :q!  and press <Enter> to abandon all changes and exit uim');
     } else if (_mode == Mode.insert) {
@@ -297,11 +301,23 @@ class Editor {
 
   void _normalKey(String key) {
     final op = _pendingOp;
+    final count = _count;
     if (op != null) {
       _pendingOp = null;
-      if (key == op) op == 'y' ? _yankLine() : _deleteLine();
+      _count = null;
+      if (key == op) op == 'y' ? _yankLines(count ?? 1) : _deleteLine();
       return;
     }
+    // A count: 1-9, then any digits (0 alone is not one).
+    if (key.length == 1 &&
+        key.codeUnitAt(0) >= 0x30 &&
+        key.codeUnitAt(0) <= 0x39 &&
+        (count != null || key != '0')) {
+      _count = (count ?? 0) * 10 + int.parse(key);
+      return;
+    }
+    // Only `yy` uses the count; other commands drop it.
+    if (key != 'y') _count = null;
     if (_move(key)) return;
     switch (key) {
       case 'i':
@@ -919,8 +935,13 @@ class Editor {
     return _anchor.compareTo(c) <= 0 ? (_anchor, c) : (c, _anchor);
   }
 
-  void _yankLine() {
-    _setRegister(_Register([_lines[_row]], linewise: true));
+  /// `yy` with a count: yanks [count] lines from the cursor line, or up to
+  /// the last line if there are fewer, as vim does.
+  void _yankLines(int count) {
+    final end = min(_row + count, _lines.length);
+    _setRegister(_Register(_lines.sublist(_row, end), linewise: true));
+    final n = end - _row;
+    _info(n == 1 ? '1 line yanked' : '$n lines yanked');
   }
 
   void _yankSelection() {
@@ -1072,6 +1093,7 @@ class Editor {
         _setCursor(_insertText(_cursor, parts));
       case Mode.normal:
         _pendingOp = null;
+        _count = null;
         final before = List.of(_lines);
         final cursorBefore = _cursor;
         final end = _insertText(_cursor, parts);
