@@ -577,6 +577,10 @@ class Editor {
     switch (cmd.trim()) {
       case '':
         break;
+      // :N jumps to line N, clamped to the buffer, at its first non-blank.
+      case final c when RegExp(r'^\d+$').hasMatch(c):
+        final row = (int.parse(c) - 1).clamp(0, _lines.length - 1);
+        _setCursor(Pos(row, _firstNonBlank(_lines[row])));
       case 'w':
         _write(force: false);
       case 'w!':
