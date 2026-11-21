@@ -305,7 +305,8 @@ class Editor {
     if (op != null) {
       _pendingOp = null;
       _count = null;
-      if (key == op) op == 'y' ? _yankLines(count ?? 1) : _deleteLine();
+      if (key == op)
+        op == 'y' ? _yankLines(count ?? 1) : _deleteLines(count ?? 1);
       return;
     }
     // A count: 1-9, then any digits (0 alone is not one).
@@ -316,8 +317,8 @@ class Editor {
       _count = (count ?? 0) * 10 + int.parse(key);
       return;
     }
-    // Only `yy` uses the count; other commands drop it.
-    if (key != 'y') _count = null;
+    // Only `yy` and `dd` use the count; other commands drop it.
+    if (key != 'y' && key != 'd') _count = null;
     if (_move(key)) return;
     switch (key) {
       case 'i':
@@ -978,18 +979,24 @@ class Editor {
     _mode = Mode.normal;
     _setCursor(s);
     _record(before, cursorBefore);
-    final n = before.length - _lines.length;
-    if (n > 2) _info('$n fewer lines');
+    final n = e.row - s.row + 1;
+    _info(n == 1 ? '1 line deleted' : '$n lines deleted');
   }
 
-  void _deleteLine() {
-    _setRegister(_Register([_lines[_row]], linewise: true));
+  /// `dd` with a count: deletes [count] lines from the cursor line, or up to
+  /// the last line if there are fewer, as vim does.
+  void _deleteLines(int count) {
+    final end = min(_row + count, _lines.length);
+    _setRegister(_Register(_lines.sublist(_row, end), linewise: true));
     final before = List.of(_lines);
     final cursorBefore = _cursor;
-    _lines.removeAt(_row);
+    _lines.removeRange(_row, end);
     if (_lines.isEmpty) {
       _lines.add(<int>[]);
       _info('--No lines in buffer--');
+    } else {
+      final n = end - _row;
+      _info(n == 1 ? '1 line deleted' : '$n lines deleted');
     }
     final row = min(_row, _lines.length - 1);
     _setCursor(Pos(row, _firstNonBlank(_lines[row])));
